@@ -21,18 +21,37 @@ contract Marketplace is Ownable, ReentrancyGuard {
         uint price;
     }
 
+    struct TokenBid {
+        address collection;
+        address bidder;
+        uint tokenId;
+        uint price;
+    }
+
+    struct CollectionCreatorFee {
+        uint fee;
+        address owner;
+    }
+
     uint public marketplaceFee;
-    uint public basicPoints = 10000;
+    uint public basisPoints = 10000;
+    uint public maxRoyaltyFee = 2000;
     address public feeReceiver;
 
     mapping(address => mapping(uint => Listing)) public listings;
-    mapping(address => mapping(address => CollectionBid)) public bids;
+    mapping(address => mapping(address => CollectionBid)) public collectionBids;
+    mapping(address => mapping(uint => mapping(address => TokenBid))) public tokenBids;
+    mapping(address => CollectionCreatorFee) public royalties;
 
     event List(address indexed seller, address indexed collection, uint tokenId, uint price);
     event CancelList(address indexed seller, address indexed collection, uint tokenId);
-    event Bid(address indexed bidder, address indexed collection, uint price);
+    event BidCollection(address indexed bidder, address indexed collection, uint price);
+    event BidToken(address indexed bidder, address indexed collection, uint tokenId, uint price);
     event CancelBid(address indexed bidder, address indexed collection);
     event Sale(address indexed seller, address indexed buyer, uint tokenId);
+    event RoyaltiesUpdated(address indexed collection, uint fee);
+    event MarketplaceFeeUpdated(uint indexed fee);
+    event MarketplaceFeeReceiverUpdated(address indexed receiver);
 
     constructor(uint _initialFee) Ownable(msg.sender) {
         marketplaceFee = _initialFee;
@@ -63,49 +82,62 @@ contract Marketplace is Ownable, ReentrancyGuard {
         require(_price > 0 && _quantity > 0, "Marketplace: price and quantity cannot be zero");
         require(_collection != address(0), "Marketplace: collection must exists");
         require(msg.value >= _price * _quantity, "Marketplace: add size to your bid");
-        require(bids[_collection][msg.sender].price == 0, "Marketplace: collection already bidded");
+        require(collectionBids[_collection][msg.sender].price == 0, "Marketplace: collection already bidded");
 
         CollectionBid memory _collectionBid = CollectionBid({collection: _collection, bidder: msg.sender, quantity: _quantity, price: _price});
 
-        bids[_collection][msg.sender] = _collectionBid;
+        collectionBids[_collection][msg.sender] = _collectionBid;
 
-        emit Bid(msg.sender, _collection, _price);
+        emit BidCollection(msg.sender, _collection, _price);
     }
 
-    function cancelBid(address _collection) external nonReentrant {
-        CollectionBid memory _bid = bids[_collection][msg.sender];
+    function cancelCollectionBid(address _collection) external nonReentrant {
+        CollectionBid memory _bid = collectionBids[_collection][msg.sender];
         require(_bid.bidder == msg.sender, "Marketplace: not bidder");
-        delete bids[_collection][msg.sender];
+        delete collectionBids[_collection][msg.sender];
 
         (bool success, ) = msg.sender.call{value: _bid.price * _bid.quantity}("");
         require(success, "Transfer failed!");
         emit CancelBid(msg.sender, _collection);
     }
 
-    function acceptBid(address _collection, address _bidder, uint[] calldata _tokensId) external nonReentrant {
-        CollectionBid memory _bid = bids[_collection][_bidder];
+    function acceptCollectionBid(address _collection, address _bidder, uint[] calldata _tokensId) external nonReentrant {
+        CollectionBid memory _bid = collectionBids[_collection][_bidder];
         require(_bid.quantity >= _tokensId.length, "Marketplace: quantity exceeds bid");
         require(IERC721(_collection).balanceOf(msg.sender) >= _tokensId.length, "Marketplace: not enough balance");
         require(IERC721(_collection).isApprovedForAll(msg.sender, address(this)), "Marketplace: collection not approved");
 
         if (_bid.quantity == _tokensId.length) {
-            delete bids[_collection][_bidder];
+            delete collectionBids[_collection][_bidder];
         } else {
-            bids[_collection][_bidder].quantity -= _tokensId.length;
+            collectionBids[_collection][_bidder].quantity -= _tokensId.length;
         }
 
         for (uint i = 0; i < _tokensId.length; i++) {
             IERC721(_collection).safeTransferFrom(msg.sender, _bid.bidder, _tokensId[i]);
+            emit Sale(msg.sender, _bid.bidder, _tokensId[i]);
         }
 
-        uint fee = (_bid.price * _tokensId.length * marketplaceFee) / basicPoints;
-        uint payment = _bid.price * _tokensId.length - fee;
+        _distributePayments(_bid.price, _collection, msg.sender);
+    }
 
-        (bool _success, ) = msg.sender.call{value: payment}("");
-        require(_success, "Accept bid pay transfer failed!");
+    function bidToken(address _collection, uint _tokenId, uint _price) external payable {
+        require(_collection != address(0) && _price > 0, "Marketplace: collection and price should exist");
+        require(msg.value >= _price, "Marketplace: add size to bid");
+        TokenBid memory _tokenBid = TokenBid({collection: _collection, bidder: msg.sender, tokenId: _tokenId, price: _price});
 
-        (bool __success, ) = feeReceiver.call{value: fee}("");
-        require(__success, "Accept bid fee transfer failed!");
+        tokenBids[_collection][_tokenId][msg.sender] = _tokenBid;
+
+        emit BidToken(msg.sender, _collection, _tokenId, _price);
+    }
+
+    function acceptTokenBid(address _collection, address bidder, uint _tokenId) external {
+        TokenBid memory _tokenBid = tokenBids[_collection][_tokenId][bidder];
+        require(_tokenBid.price>0, "Marketplace: bid doesn't exists");
+        require(IERC721(_collection).ownerOf(_tokenId) == msg.sender, "Marketplace: Not owner");
+        require(IERC721(_collection).isApprovedForAll(msg.sender, address(this)), "Marketplace: collection not approved");
+
+        _distributePayments(_tokenBid.price, _collection, msg.sender);
     }
 
     function buy(address _collection, uint _tokenId) external payable nonReentrant {
@@ -115,20 +147,39 @@ contract Marketplace is Ownable, ReentrancyGuard {
 
         delete listings[_collection][_tokenId];
 
-        uint fee = ((_listing.price * marketplaceFee) / basicPoints);
-        uint payment = _listing.price - fee;
-
-        (bool _success, ) = _listing.seller.call{value: payment}("");
-        require(_success, "Buy pay transfer failed");
-
-        (bool __success, ) = feeReceiver.call{value: fee}("");
-        require(__success, "Buy fee transfer failed");
+        _distributePayments(_listing.price, _collection, _listing.seller);
 
         IERC721(_collection).safeTransferFrom(_listing.seller, msg.sender, _listing.tokenId);
         emit Sale(_listing.seller, msg.sender, _tokenId);
     }
 
+    function _distributePayments(uint _price, address _collection, address _to) internal {
+        uint fee = _price * marketplaceFee / basisPoints;
+        uint royalty = _price * royalties[_collection].fee / basisPoints;
+        uint payment = _price - fee - royalty;
+
+        (bool ok1,) = feeReceiver.call{value: fee}("");
+        require(ok1, "Fee transfer failed");
+        (bool ok2,) = _to.call{value: payment}("");
+        require(ok2, "Payment transfer failed");
+        (bool ok3,) = royalties[_collection].owner.call{value:royalty}("");
+        require(ok3, "Royalties transfer failed");
+    }
+
+    function updateRoyalites(address _collection, address _collectionOwner, uint _royalty) external onlyOwner {
+        require(_royalty <= maxRoyaltyFee, "Fee too high");
+        CollectionCreatorFee memory _creatorFee = CollectionCreatorFee({fee: _royalty, owner: _collectionOwner});
+        royalties[_collection] = _creatorFee;
+        emit RoyaltiesUpdated(_collection, _royalty);
+    }
+
     function updateMarketplaceFee(uint _newFee) external onlyOwner {
         marketplaceFee = _newFee;
+        emit MarketplaceFeeUpdated(_newFee);
+    }
+
+    function updateFeeReceiver(address _newReceiver) external onlyOwner {
+        feeReceiver = _newReceiver;
+        emit MarketplaceFeeReceiverUpdated(_newReceiver);
     }
 }
