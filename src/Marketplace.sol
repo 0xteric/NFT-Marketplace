@@ -14,13 +14,27 @@ contract Marketplace is Ownable, ReentrancyGuard {
         uint price;
     }
 
+    struct CollectionBid {
+        address collection;
+        address bidder;
+        uint quantity;
+        uint price;
+    }
+
+    uint public marketplaceFee;
+
     mapping(address => mapping(uint => Listing)) public listings;
+    mapping(address => mapping(address => CollectionBid)) public bids;
 
     event List(address indexed seller, address indexed collection, uint tokenId, uint price);
     event CancelList(address indexed seller, address indexed collection, uint tokenId);
+    event Bid(address indexed bidder, address indexed collection, uint price);
+    event CancelBid(address indexed bidder, address indexed collection);
     event Sale(address indexed seller, address indexed buyer, uint tokenId);
 
-    constructor() Ownable(msg.sender) {}
+    constructor(uint _initialFee) Ownable(msg.sender) {
+        marketplaceFee = _initialFee;
+    }
 
     function list(address _collection, uint _tokenId, uint _price) external {
         require(_price > 0, "Price must be greater");
@@ -39,6 +53,29 @@ contract Marketplace is Ownable, ReentrancyGuard {
         delete listings[_collection][_tokenId];
 
         emit CancelList(msg.sender, _collection, _tokenId);
+    }
+
+    function bidCollection(address _collection, uint _price, uint _quantity) external payable {
+        require(_price > 0 && _quantity > 0, "Marketplace: price and quantity cannot be zero");
+        require(_collection != address(0), "Marketplace: collection must exists");
+        require(msg.value >= _price * _quantity, "Marketplace: add size to your bid");
+        require(bids[_collection][msg.sender].price == 0, "Marketplace: collection already bidded");
+
+        CollectionBid memory _collectionBid = CollectionBid({collection: _collection, bidder: msg.sender, quantity: _quantity, price: _price});
+
+        bids[_collection][msg.sender] = _collectionBid;
+
+        emit Bid(msg.sender, _collection, _price);
+    }
+
+    function cancelBid(address _collection) external nonReentrant {
+        CollectionBid memory _bid = bids[_collection][msg.sender];
+        require(_bid.bidder == msg.sender, "Marketplace: not bidder");
+        delete bids[_collection][msg.sender];
+
+        (bool success, ) = msg.sender.call{value: _bid.price * _bid.quantity}("");
+        require(success, "Transfer failed!");
+        emit CancelBid(msg.sender, _collection);
     }
 
     function buy(address _collection, uint _tokenId) external payable nonReentrant {
