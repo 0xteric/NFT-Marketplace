@@ -131,13 +131,15 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit BidToken(msg.sender, _collection, _tokenId, _price);
     }
 
-    function acceptTokenBid(address _collection, address bidder, uint _tokenId) external {
-        TokenBid memory _tokenBid = tokenBids[_collection][_tokenId][bidder];
-        require(_tokenBid.price>0, "Marketplace: bid doesn't exists");
+    function acceptTokenBid(address _collection, address _bidder, uint _tokenId) external {
+        TokenBid memory _tokenBid = tokenBids[_collection][_tokenId][_bidder];
+        require(_tokenBid.price > 0, "Marketplace: bid doesn't exists");
         require(IERC721(_collection).ownerOf(_tokenId) == msg.sender, "Marketplace: Not owner");
         require(IERC721(_collection).isApprovedForAll(msg.sender, address(this)), "Marketplace: collection not approved");
 
         _distributePayments(_tokenBid.price, _collection, msg.sender);
+
+        IERC721(_collection).safeTransferFrom(msg.sender, bidder, _tokenId);
     }
 
     function buy(address _collection, uint _tokenId) external payable nonReentrant {
@@ -154,15 +156,15 @@ contract Marketplace is Ownable, ReentrancyGuard {
     }
 
     function _distributePayments(uint _price, address _collection, address _to) internal {
-        uint fee = _price * marketplaceFee / basisPoints;
-        uint royalty = _price * royalties[_collection].fee / basisPoints;
+        uint fee = (_price * marketplaceFee) / basisPoints;
+        uint royalty = (_price * royalties[_collection].fee) / basisPoints;
         uint payment = _price - fee - royalty;
 
-        (bool ok1,) = feeReceiver.call{value: fee}("");
+        (bool ok1, ) = feeReceiver.call{value: fee}("");
         require(ok1, "Fee transfer failed");
-        (bool ok2,) = _to.call{value: payment}("");
+        (bool ok2, ) = _to.call{value: payment}("");
         require(ok2, "Payment transfer failed");
-        (bool ok3,) = royalties[_collection].owner.call{value:royalty}("");
+        (bool ok3, ) = royalties[_collection].owner.call{value: royalty}("");
         require(ok3, "Royalties transfer failed");
     }
 
