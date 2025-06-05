@@ -141,7 +141,7 @@ contract Marketplace is Ownable, ReentrancyGuard {
 
         _distributePayments(_tokenBid.price, _collection, msg.sender);
 
-        if (listings[_collection][_tokensId[i]].price > 0) delete listings[_collection][_tokensId[i]];
+        if (listings[_collection][_tokenId].price > 0) delete listings[_collection][_tokenId];
 
         IERC721(_collection).safeTransferFrom(msg.sender, _bidder, _tokenId);
 
@@ -151,7 +151,6 @@ contract Marketplace is Ownable, ReentrancyGuard {
     function cancelTokenBid(address _collection, uint _tokenId) external {
         TokenBid memory _tokenBid = tokenBids[_collection][_tokenId][msg.sender];
         require(_tokenBid.price > 0, "Marketplace: bid not exists");
-        require(_tokenBid.bidder == msg.sender, "Marketplace: Not bid owner");
 
         delete tokenBids[_collection][_tokenId][msg.sender];
 
@@ -188,7 +187,7 @@ contract Marketplace is Ownable, ReentrancyGuard {
     }
 
     function updateRoyalties(address _collection, address _collectionOwner, uint _royalty) external onlyOwner {
-        require(_royalty <= maxRoyaltyFee, "Fee too high");
+        require(_royalty <= maxRoyaltyFee, "Marketplace: fee too high");
         CollectionCreatorFee memory _creatorFee = CollectionCreatorFee({fee: _royalty, owner: _collectionOwner});
         royalties[_collection] = _creatorFee;
         emit RoyaltiesUpdated(_collection, _royalty);
