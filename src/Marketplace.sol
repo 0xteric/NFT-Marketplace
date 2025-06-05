@@ -114,6 +114,8 @@ contract Marketplace is Ownable, ReentrancyGuard {
         }
 
         for (uint i = 0; i < _tokensId.length; i++) {
+            if (listings[_collection][_tokensId[i]].price > 0) delete listings[_collection][_tokensId[i]];
+
             IERC721(_collection).safeTransferFrom(msg.sender, _bid.bidder, _tokensId[i]);
             emit Sale(msg.sender, _bid.bidder, _tokensId[i]);
         }
@@ -138,6 +140,8 @@ contract Marketplace is Ownable, ReentrancyGuard {
         require(IERC721(_collection).isApprovedForAll(msg.sender, address(this)), "Marketplace: collection not approved");
 
         _distributePayments(_tokenBid.price, _collection, msg.sender);
+
+        if (listings[_collection][_tokensId[i]].price > 0) delete listings[_collection][_tokensId[i]];
 
         IERC721(_collection).safeTransferFrom(msg.sender, _bidder, _tokenId);
 
