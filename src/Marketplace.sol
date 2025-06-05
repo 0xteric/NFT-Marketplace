@@ -131,7 +131,7 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit BidToken(msg.sender, _collection, _tokenId, _price);
     }
 
-    function acceptTokenBid(address _collection, address _bidder, uint _tokenId) external {
+    function acceptTokenBid(address _collection, address _bidder, uint _tokenId) external nonReentrant {
         TokenBid memory _tokenBid = tokenBids[_collection][_tokenId][_bidder];
         require(_tokenBid.price > 0, "Marketplace: bid doesn't exists");
         require(IERC721(_collection).ownerOf(_tokenId) == msg.sender, "Marketplace: Not owner");
@@ -139,7 +139,21 @@ contract Marketplace is Ownable, ReentrancyGuard {
 
         _distributePayments(_tokenBid.price, _collection, msg.sender);
 
-        IERC721(_collection).safeTransferFrom(msg.sender, bidder, _tokenId);
+        IERC721(_collection).safeTransferFrom(msg.sender, _bidder, _tokenId);
+
+        emit Sale(msg.sender, _bidder, _tokenId);
+    }
+
+    function cancelTokenBid(address _collection, uint _tokenId) external {
+        TokenBid memory _tokenBid = tokenBids[_collection][_tokenId][msg.sender];
+        require(_tokenBid.price > 0, "Marketplace: bid not exists");
+        require(_tokenBid.bidder == msg.sender, "Marketplace: Not bid owner");
+
+        delete tokenBids[_collection][_tokenId][msg.sender];
+
+        (bool success, ) = msg.sender.call{value: _tokenBid.price}("");
+        require(success, "Cancel token bid transfer failed");
+        emit CancelBid(_tokenBid.bidder, _collection);
     }
 
     function buy(address _collection, uint _tokenId) external payable nonReentrant {
@@ -164,11 +178,12 @@ contract Marketplace is Ownable, ReentrancyGuard {
         require(ok1, "Fee transfer failed");
         (bool ok2, ) = _to.call{value: payment}("");
         require(ok2, "Payment transfer failed");
+        require(royalties[_collection].owner != address(0) || royalties[_collection].fee == 0, "Marketplace: invalid royalty receiver");
         (bool ok3, ) = royalties[_collection].owner.call{value: royalty}("");
         require(ok3, "Royalties transfer failed");
     }
 
-    function updateRoyalites(address _collection, address _collectionOwner, uint _royalty) external onlyOwner {
+    function updateRoyalties(address _collection, address _collectionOwner, uint _royalty) external onlyOwner {
         require(_royalty <= maxRoyaltyFee, "Fee too high");
         CollectionCreatorFee memory _creatorFee = CollectionCreatorFee({fee: _royalty, owner: _collectionOwner});
         royalties[_collection] = _creatorFee;

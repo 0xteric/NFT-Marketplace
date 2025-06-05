@@ -24,13 +24,14 @@ contract MarketplaceTest is Test {
 
     function setUp() public {
         vm.prank(deployer);
-        marketplace = new Marketplace();
+        marketplace = new Marketplace(200);
         mockNFT = new MockNFT();
         mockNFT.mint(user1, 1);
     }
 
     function testList() public {
         vm.startPrank(user1);
+        mockNFT.setApprovalForAll(address(marketplace), true);
         (, , , uint _price) = marketplace.listings(address(mockNFT), 1);
         assertEq(_price, 0);
 
@@ -43,18 +44,22 @@ contract MarketplaceTest is Test {
 
     function testListPriceZero() public {
         vm.prank(user1);
+        mockNFT.setApprovalForAll(address(marketplace), true);
         vm.expectRevert("Price must be greater");
         marketplace.list(address(mockNFT), 1, 0);
     }
 
     function testListNotOwner() public {
-        vm.prank(user2);
+        vm.startPrank(user2);
+        mockNFT.setApprovalForAll(address(marketplace), true);
         vm.expectRevert("Not owner");
         marketplace.list(address(mockNFT), 1, 1 ether);
+        vm.stopPrank();
     }
 
     function testCancelList() public {
         vm.startPrank(user1);
+        mockNFT.setApprovalForAll(address(marketplace), true);
         marketplace.list(address(mockNFT), 1, 1 ether);
         (, , , uint _price) = marketplace.listings(address(mockNFT), 1);
         assertEq(_price, 1 ether);
@@ -68,8 +73,10 @@ contract MarketplaceTest is Test {
     }
 
     function testCancelListNotOwner() public {
-        vm.prank(user1);
+        vm.startPrank(user1);
+        mockNFT.setApprovalForAll(address(marketplace), true);
         marketplace.list(address(mockNFT), 1, 1 ether);
+        vm.stopPrank();
         (, , , uint _price) = marketplace.listings(address(mockNFT), 1);
 
         assertEq(_price, 1 ether);
@@ -119,5 +126,95 @@ contract MarketplaceTest is Test {
         vm.deal(user2, 1 ether);
         vm.expectRevert("Insufficient value");
         marketplace.buy{value: 0.5 ether}(address(mockNFT), 1);
+    }
+
+    function testBidCollection() public {
+        vm.startPrank(user2);
+        vm.deal(user2, 1 ether);
+
+        marketplace.bidCollection{value: 0.5 ether}(address(mockNFT), 0.5 ether, 1);
+        (, , , uint price) = marketplace.collectionBids(address(mockNFT), user2);
+
+        assertEq(price, 0.5 ether);
+        assertEq(user2.balance, 0.5 ether);
+        assertEq(address(marketplace).balance, 0.5 ether);
+
+        vm.stopPrank();
+    }
+
+    function testBidCollectionPriceZero() public {
+        vm.startPrank(user2);
+        vm.deal(user2, 1 ether);
+        vm.expectRevert("Marketplace: price and quantity cannot be zero");
+        marketplace.bidCollection{value: 0}(address(mockNFT), 0 ether, 0);
+        vm.stopPrank();
+    }
+
+    function testBidNoCollection() public {
+        vm.startPrank(user2);
+        vm.deal(user2, 1 ether);
+        vm.expectRevert("Marketplace: collection must exists");
+        marketplace.bidCollection{value: 1 ether}(address(0), 1 ether, 1);
+        vm.stopPrank();
+    }
+
+    function testBidNoSize() public {
+        vm.startPrank(user2);
+        vm.deal(user2, 1 ether);
+        vm.expectRevert("Marketplace: add size to your bid");
+        marketplace.bidCollection{value: 1 ether}(address(mockNFT), 1 ether, 2);
+        vm.stopPrank();
+    }
+
+    function testBidAlreadyExist() public {
+        vm.startPrank(user2);
+        vm.deal(user2, 2 ether);
+        marketplace.bidCollection{value: 1 ether}(address(mockNFT), 1 ether, 1);
+        vm.expectRevert("Marketplace: collection already bidded");
+        marketplace.bidCollection{value: 1 ether}(address(mockNFT), 1 ether, 1);
+        vm.stopPrank();
+    }
+
+    function testCancelCollectionBid() public {
+        vm.startPrank(user2);
+        vm.deal(user2, 1 ether);
+        marketplace.bidCollection{value: 1 ether}(address(mockNFT), 1 ether, 1);
+        (, , , uint price) = marketplace.collectionBids(address(mockNFT), user2);
+
+        assertEq(price, 1 ether);
+        assertEq(user2.balance, 0 ether);
+        assertEq(address(marketplace).balance, 1 ether);
+
+        marketplace.cancelCollectionBid(address(mockNFT));
+        (, , , uint priceAfter) = marketplace.collectionBids(address(mockNFT), user2);
+        assertEq(priceAfter, 0);
+        assertEq(user2.balance, 1 ether);
+        assertEq(address(marketplace).balance, 0);
+        vm.stopPrank();
+    }
+
+    function testCancelCollectionBidNotBidder() public {
+        vm.startPrank(user2);
+        vm.deal(user2, 1 ether);
+        marketplace.bidCollection{value: 1 ether}(address(mockNFT), 1 ether, 1);
+        (, , , uint price) = marketplace.collectionBids(address(mockNFT), user2);
+        vm.stopPrank();
+
+        assertEq(price, 1 ether);
+        assertEq(user2.balance, 0 ether);
+        assertEq(address(marketplace).balance, 1 ether);
+        vm.startPrank(user1);
+
+        vm.expectRevert("Marketplace: not bidder");
+        marketplace.cancelCollectionBid(address(mockNFT));
+        vm.stopPrank();
+    }
+
+    function testAcceptCollectionBid() public {
+        vm.startPrank(user2);
+        vm.deal(user2, 1 ether);
+        marketplace.bidCollection{value: 1 ether}(address(mockNFT), 1 ether, 1);
+        (, , , uint price) = marketplace.collectionBids(address(mockNFT), user2);
+        vm.stopPrank();
     }
 }
