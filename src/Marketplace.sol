@@ -58,6 +58,12 @@ contract Marketplace is Ownable, ReentrancyGuard {
         feeReceiver = msg.sender;
     }
 
+    /**
+     * Lists a sell order of a token
+     * @param _collection token address
+     * @param _tokenId token id
+     * @param _price order price
+     */
     function list(address _collection, uint _tokenId, uint _price) external {
         require(_price > 0, "Price must be greater");
         require(IERC721(_collection).ownerOf(_tokenId) == msg.sender, "Not owner");
@@ -70,6 +76,11 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit List(msg.sender, _collection, _tokenId, _price);
     }
 
+    /**
+     * Cancels an active listing
+     * @param _collection token address
+     * @param _tokenId token id
+     */
     function cancelList(address _collection, uint _tokenId) external {
         require(listings[_collection][_tokenId].seller == msg.sender, "Not owner");
 
@@ -77,6 +88,13 @@ contract Marketplace is Ownable, ReentrancyGuard {
 
         emit CancelList(msg.sender, _collection, _tokenId);
     }
+
+    /**
+     * Adds a buy order for any token id of the selected collection, needs the buy amount to be sent
+     * @param _collection collection address
+     * @param _price offer price
+     * @param _quantity amount of tokens to buy
+     */
 
     function bidCollection(address _collection, uint _price, uint _quantity) external payable {
         require(_price > 0 && _quantity > 0, "Marketplace: price and quantity cannot be zero");
@@ -91,6 +109,10 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit BidCollection(msg.sender, _collection, _price);
     }
 
+    /**
+     * Cancels an active collection bid, returning the value to the owner
+     * @param _collection collection address
+     */
     function cancelCollectionBid(address _collection) external nonReentrant {
         CollectionBid memory _bid = collectionBids[_collection][msg.sender];
         require(_bid.bidder == msg.sender, "Marketplace: not bidder");
@@ -101,6 +123,12 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit CancelBid(msg.sender, _collection);
     }
 
+    /**
+     * Accepts a collection bid selling the token to the bidder
+     * @param _collection collection address
+     * @param _bidder bidder address
+     * @param _tokensId token id list
+     */
     function acceptCollectionBid(address _collection, address _bidder, uint[] calldata _tokensId) external nonReentrant {
         CollectionBid memory _bid = collectionBids[_collection][_bidder];
         require(_bid.quantity >= _tokensId.length, "Marketplace: quantity exceeds bid");
@@ -123,6 +151,12 @@ contract Marketplace is Ownable, ReentrancyGuard {
         _distributePayments(_bid.price, _collection, msg.sender);
     }
 
+    /**
+     * Creates a buy order for an specific token, needs the buy amount to be sent
+     * @param _collection token address
+     * @param _tokenId token id
+     * @param _price order price
+     */
     function bidToken(address _collection, uint _tokenId, uint _price) external payable {
         require(_collection != address(0) && _price > 0, "Marketplace: collection and price should exist");
         require(msg.value >= _price, "Marketplace: add size to bid");
@@ -133,6 +167,12 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit BidToken(msg.sender, _collection, _tokenId, _price);
     }
 
+    /**
+     * Accepts a buy order for the specific token
+     * @param _collection token address
+     * @param _bidder bidder address
+     * @param _tokenId token id
+     */
     function acceptTokenBid(address _collection, address _bidder, uint _tokenId) external nonReentrant {
         TokenBid memory _tokenBid = tokenBids[_collection][_tokenId][_bidder];
         require(_tokenBid.price > 0, "Marketplace: bid doesn't exists");
@@ -148,6 +188,11 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit Sale(msg.sender, _bidder, _tokenId);
     }
 
+    /**
+     * Cancels an active token bid, returning the value to the owner
+     * @param _collection token address
+     * @param _tokenId token id
+     */
     function cancelTokenBid(address _collection, uint _tokenId) external {
         TokenBid memory _tokenBid = tokenBids[_collection][_tokenId][msg.sender];
         require(_tokenBid.price > 0, "Marketplace: bid not exists");
@@ -159,6 +204,11 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit CancelBid(_tokenBid.bidder, _collection);
     }
 
+    /**
+     * Buys a token listed
+     * @param _collection token address
+     * @param _tokenId token id
+     */
     function buy(address _collection, uint _tokenId) external payable nonReentrant {
         Listing memory _listing = listings[_collection][_tokenId];
         require(_listing.price > 0, "Listing not exists");
@@ -172,6 +222,12 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit Sale(_listing.seller, msg.sender, _tokenId);
     }
 
+    /**
+     * Manages the payment process of every buy/sell transfer
+     * @param _price price of the order
+     * @param _collection token address
+     * @param _to token seller address
+     */
     function _distributePayments(uint _price, address _collection, address _to) internal {
         uint fee = (_price * marketplaceFee) / basisPoints;
         uint royalty = (_price * royalties[_collection].fee) / basisPoints;
@@ -186,6 +242,12 @@ contract Marketplace is Ownable, ReentrancyGuard {
         require(ok3, "Royalties transfer failed");
     }
 
+    /**
+     * Updates the amount and royalties receiver of a collection in basis points
+     * @param _collection collection address
+     * @param _collectionOwner owner address
+     * @param _royalty new royalty fee
+     */
     function updateRoyalties(address _collection, address _collectionOwner, uint _royalty) external onlyOwner {
         require(_royalty <= maxRoyaltyFee, "Marketplace: fee too high");
         CollectionCreatorFee memory _creatorFee = CollectionCreatorFee({fee: _royalty, owner: _collectionOwner});
@@ -193,11 +255,19 @@ contract Marketplace is Ownable, ReentrancyGuard {
         emit RoyaltiesUpdated(_collection, _royalty);
     }
 
+    /**
+     * Updates the marketplace base fee
+     * @param _newFee new fee
+     */
     function updateMarketplaceFee(uint _newFee) external onlyOwner {
         marketplaceFee = _newFee;
         emit MarketplaceFeeUpdated(_newFee);
     }
 
+    /**
+     * Updates the marketplace base fee receiver address
+     * @param _newReceiver new receiver address
+     */
     function updateFeeReceiver(address _newReceiver) external onlyOwner {
         feeReceiver = _newReceiver;
         emit MarketplaceFeeReceiverUpdated(_newReceiver);
