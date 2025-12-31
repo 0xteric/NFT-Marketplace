@@ -142,13 +142,15 @@ contract Marketplace is Ownable, ReentrancyGuard {
         }
 
         for (uint i = 0; i < _tokensId.length; i++) {
+            require(IERC721(_collection).ownerOf(_tokensId[i]) == msg.sender);
+
             if (listings[_collection][_tokensId[i]].price > 0) delete listings[_collection][_tokensId[i]];
 
             IERC721(_collection).safeTransferFrom(msg.sender, _bid.bidder, _tokensId[i]);
             emit Sale(msg.sender, _bid.bidder, _tokensId[i]);
         }
 
-        _distributePayments(_bid.price, _collection, msg.sender);
+        _distributePayments(_bid.price * _tokensId.length, _collection, msg.sender);
     }
 
     /**
@@ -178,6 +180,8 @@ contract Marketplace is Ownable, ReentrancyGuard {
         require(_tokenBid.price > 0, "Marketplace: bid doesn't exists");
         require(IERC721(_collection).ownerOf(_tokenId) == msg.sender, "Marketplace: Not owner");
         require(IERC721(_collection).isApprovedForAll(msg.sender, address(this)), "Marketplace: collection not approved");
+
+        delete tokenBids[_collection][_tokenId][_bidder];
 
         _distributePayments(_tokenBid.price, _collection, msg.sender);
 
@@ -237,9 +241,12 @@ contract Marketplace is Ownable, ReentrancyGuard {
         require(ok1, "Fee transfer failed");
         (bool ok2, ) = _to.call{value: payment}("");
         require(ok2, "Payment transfer failed");
-        require(royalties[_collection].owner != address(0) || royalties[_collection].fee == 0, "Marketplace: invalid royalty receiver");
-        (bool ok3, ) = royalties[_collection].owner.call{value: royalty}("");
-        require(ok3, "Royalties transfer failed");
+
+        if (royalty > 0) {
+            require(royalties[_collection].owner != address(0));
+            (bool ok3, ) = royalties[_collection].owner.call{value: royalty}("");
+            require(ok3, "Royalties transfer failed");
+        }
     }
 
     /**
