@@ -8,6 +8,7 @@ import "../lib/openzeppelin-contracts/contracts/utils/ReentrancyGuard.sol";
 
 contract Marketplace is Ownable, ReentrancyGuard {
     struct Listing {
+        uint id;
         address collection;
         address seller;
         uint tokenId;
@@ -33,29 +34,40 @@ contract Marketplace is Ownable, ReentrancyGuard {
         address owner;
     }
 
+    uint public nextListingId;
     uint public marketplaceFee;
     uint public basisPoints = 10000;
     uint public maxRoyaltyFee = 2000;
     address public feeReceiver;
+
+    uint public totalListings;
+    uint public totalSales;
+    uint public totalVolume;
 
     mapping(address => mapping(uint => Listing)) public listings;
     mapping(address => mapping(address => CollectionBid)) public collectionBids;
     mapping(address => mapping(uint => mapping(address => TokenBid))) public tokenBids;
     mapping(address => CollectionCreatorFee) public royalties;
 
-    event List(address indexed seller, address indexed collection, uint tokenId, uint price);
-    event CancelList(address indexed seller, address indexed collection, uint tokenId);
-    event BidCollection(address indexed bidder, address indexed collection, uint price);
-    event BidToken(address indexed bidder, address indexed collection, uint tokenId, uint price);
-    event CancelBid(address indexed bidder, address indexed collection);
-    event Sale(address indexed seller, address indexed buyer, uint tokenId);
+    event ListingCreated(uint indexed id, address indexed collection, uint indexed tokenId, address seller, uint price);
+    event ListingCancelled(uint indexed id, address indexed collection, uint indexed tokenId, address seller, uint price);
+    event ListingSold(uint indexed id, address indexed collection, uint256 indexed tokenId, address seller, address buyer, uint256 price, uint256 marketplaceFee, uint256 royaltyFee);
+    event CollectionBidCreated(address indexed bidder, address indexed collection, uint256 quantity, uint256 price);
+    event CollectionBidCancelled(address indexed bidder, address indexed collection);
+    event TokenBidCreated(address indexed bidder, address indexed collection, uint indexed tokenId, uint price);
+    event TokenBidCancelled(address indexed bidder, address indexed collection, uint indexed tokenId);
+    event BidSold(address indexed collection, uint256 indexed tokenId, address indexed seller, address buyer, uint256 price, uint256 marketplaceFee, uint256 royaltyFee);
     event RoyaltiesUpdated(address indexed collection, uint fee);
-    event MarketplaceFeeUpdated(uint indexed fee);
+    event MarketplaceFeeUpdated(uint oldFee, uint newFee);
     event MarketplaceFeeReceiverUpdated(address indexed receiver);
 
     constructor(uint _initialFee) Ownable(msg.sender) {
         marketplaceFee = _initialFee;
         feeReceiver = msg.sender;
+    }
+
+    function isListed(address collection, uint tokenId) external view returns (bool) {
+        return listings[collection][tokenId].price > 0;
     }
 
     /**
@@ -69,11 +81,17 @@ contract Marketplace is Ownable, ReentrancyGuard {
         require(IERC721(_collection).ownerOf(_tokenId) == msg.sender, "Not owner");
         require(IERC721(_collection).isApprovedForAll(msg.sender, address(this)), "Marketplace: collection not approved");
 
-        Listing memory newListing = Listing({collection: _collection, seller: msg.sender, tokenId: _tokenId, price: _price});
+        uint256 id = nextListingId++;
 
-        listings[_collection][_tokenId] = newListing;
+        if (listings[_collection][_tokenId].price > 0) {
+            Listing memory old = listings[_collection][_tokenId];
+            delete listings[_collection][_tokenId];
+            emit ListingCancelled(old.id, _collection, _tokenId, msg.sender, old.price);
+        }
 
-        emit List(msg.sender, _collection, _tokenId, _price);
+        listings[_collection][_tokenId] = Listing({id: id, collection: _collection, seller: msg.sender, tokenId: _tokenId, price: _price});
+
+        emit ListingCreated(id, _collection, _tokenId, msg.sender, _price);
     }
 
     /**
@@ -84,9 +102,10 @@ contract Marketplace is Ownable, ReentrancyGuard {
     function cancelList(address _collection, uint _tokenId) external {
         require(listings[_collection][_tokenId].seller == msg.sender, "Not owner");
 
+        Listing memory old = listings[_collection][_tokenId];
         delete listings[_collection][_tokenId];
 
-        emit CancelList(msg.sender, _collection, _tokenId);
+        emit ListingCancelled(old.id, _collection, _tokenId, msg.sender, old.price);
     }
 
     /**
@@ -106,7 +125,7 @@ contract Marketplace is Ownable, ReentrancyGuard {
 
         collectionBids[_collection][msg.sender] = _collectionBid;
 
-        emit BidCollection(msg.sender, _collection, _price);
+        emit CollectionBidCreated(msg.sender, _collection, _quantity, _price);
     }
 
     /**
@@ -120,7 +139,7 @@ contract Marketplace is Ownable, ReentrancyGuard {
 
         (bool success, ) = msg.sender.call{value: _bid.price * _bid.quantity}("");
         require(success, "Transfer failed!");
-        emit CancelBid(msg.sender, _collection);
+        emit CollectionBidCancelled(msg.sender, _collection);
     }
 
     /**
@@ -144,10 +163,16 @@ contract Marketplace is Ownable, ReentrancyGuard {
         for (uint i = 0; i < _tokensId.length; i++) {
             require(IERC721(_collection).ownerOf(_tokensId[i]) == msg.sender);
 
-            if (listings[_collection][_tokensId[i]].price > 0) delete listings[_collection][_tokensId[i]];
+            if (listings[_collection][_tokensId[i]].price > 0) {
+                Listing memory old = listings[_collection][_tokensId[i]];
+                delete listings[_collection][_tokensId[i]];
+                emit ListingCancelled(old.id, _collection, _tokensId[i], msg.sender, old.price);
+            }
 
             IERC721(_collection).safeTransferFrom(msg.sender, _bid.bidder, _tokensId[i]);
-            emit Sale(msg.sender, _bid.bidder, _tokensId[i]);
+
+            totalSales += 1;
+            emit BidSold(_collection, _tokensId[i], msg.sender, _bid.bidder, _bid.price, marketplaceFee, royalties[_collection].fee);
         }
 
         _distributePayments(_bid.price * _tokensId.length, _collection, msg.sender);
@@ -162,11 +187,13 @@ contract Marketplace is Ownable, ReentrancyGuard {
     function bidToken(address _collection, uint _tokenId, uint _price) external payable {
         require(_collection != address(0) && _price > 0, "Marketplace: collection and price should exist");
         require(msg.value >= _price, "Marketplace: add size to bid");
+        require(tokenBids[_collection][_tokenId][msg.sender].price == 0, "Marketplace: Bid already exists");
+
         TokenBid memory _tokenBid = TokenBid({collection: _collection, bidder: msg.sender, tokenId: _tokenId, price: _price});
 
         tokenBids[_collection][_tokenId][msg.sender] = _tokenBid;
 
-        emit BidToken(msg.sender, _collection, _tokenId, _price);
+        emit TokenBidCreated(msg.sender, _collection, _tokenId, _price);
     }
 
     /**
@@ -181,15 +208,17 @@ contract Marketplace is Ownable, ReentrancyGuard {
         require(IERC721(_collection).ownerOf(_tokenId) == msg.sender, "Marketplace: Not owner");
         require(IERC721(_collection).isApprovedForAll(msg.sender, address(this)), "Marketplace: collection not approved");
 
-        delete tokenBids[_collection][_tokenId][_bidder];
-
-        _distributePayments(_tokenBid.price, _collection, msg.sender);
-
         if (listings[_collection][_tokenId].price > 0) delete listings[_collection][_tokenId];
+
+        delete tokenBids[_collection][_tokenId][_bidder];
 
         IERC721(_collection).safeTransferFrom(msg.sender, _bidder, _tokenId);
 
-        emit Sale(msg.sender, _bidder, _tokenId);
+        _distributePayments(_tokenBid.price, _collection, msg.sender);
+
+        totalSales += 1;
+
+        emit BidSold(_collection, _tokenId, msg.sender, _bidder, _tokenBid.price, marketplaceFee, royalties[_collection].fee);
     }
 
     /**
@@ -205,7 +234,7 @@ contract Marketplace is Ownable, ReentrancyGuard {
 
         (bool success, ) = msg.sender.call{value: _tokenBid.price}("");
         require(success, "Cancel token bid transfer failed");
-        emit CancelBid(_tokenBid.bidder, _collection);
+        emit TokenBidCancelled(_tokenBid.bidder, _collection, _tokenId);
     }
 
     /**
@@ -223,7 +252,9 @@ contract Marketplace is Ownable, ReentrancyGuard {
         _distributePayments(_listing.price, _collection, _listing.seller);
 
         IERC721(_collection).safeTransferFrom(_listing.seller, msg.sender, _listing.tokenId);
-        emit Sale(_listing.seller, msg.sender, _tokenId);
+
+        totalSales += 1;
+        emit ListingSold(_listing.id, _collection, _tokenId, _listing.seller, msg.sender, _listing.price, marketplaceFee, royalties[_collection].fee);
     }
 
     /**
@@ -247,6 +278,8 @@ contract Marketplace is Ownable, ReentrancyGuard {
             (bool ok3, ) = royalties[_collection].owner.call{value: royalty}("");
             require(ok3, "Royalties transfer failed");
         }
+
+        totalVolume += _price;
     }
 
     /**
@@ -267,8 +300,10 @@ contract Marketplace is Ownable, ReentrancyGuard {
      * @param _newFee new fee
      */
     function updateMarketplaceFee(uint _newFee) external onlyOwner {
+        require(_newFee <= 1000);
+        uint _oldFee = marketplaceFee;
         marketplaceFee = _newFee;
-        emit MarketplaceFeeUpdated(_newFee);
+        emit MarketplaceFeeUpdated(_oldFee, _newFee);
     }
 
     /**
@@ -279,4 +314,6 @@ contract Marketplace is Ownable, ReentrancyGuard {
         feeReceiver = _newReceiver;
         emit MarketplaceFeeReceiverUpdated(_newReceiver);
     }
+
+    receive() external payable {}
 }
