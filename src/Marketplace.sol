@@ -14,10 +14,6 @@ contract Marketplace is Bids {
 
     constructor(uint _initialFee) Bids(_initialFee) {}
 
-    // ================================
-    // Admin Functions
-    // ================================
-
     function updateMarketplaceFee(uint _newFee) external onlyOwner {
         require(_newFee <= maxRoyaltyFee, "Fee too high");
         uint oldFee = marketplaceFee;
@@ -47,9 +43,6 @@ contract Marketplace is Bids {
         emit RoyaltiesUpdated(_collection, _newRoyalty);
     }
 
-    // ================================
-    // Fallback / Receive
-    // ================================
     receive() external payable {}
 
     fallback() external payable {}
