@@ -32,11 +32,11 @@ contract MarketplaceTest is Test {
     function testList() public {
         vm.startPrank(user1);
         mockNFT.setApprovalForAll(address(marketplace), true);
-        (, , , , uint _price) = marketplace.listings(address(mockNFT), 1);
+        (, , uint _price) = marketplace.listings(address(mockNFT), 1);
         assertEq(_price, 0);
 
         marketplace.list(address(mockNFT), 1, 1 ether);
-        (, , , , uint __price) = marketplace.listings(address(mockNFT), 1);
+        (, , uint __price) = marketplace.listings(address(mockNFT), 1);
         vm.stopPrank();
 
         assertEq(_price == 0, __price == 1 ether);
@@ -61,13 +61,13 @@ contract MarketplaceTest is Test {
         vm.startPrank(user1);
         mockNFT.setApprovalForAll(address(marketplace), true);
         marketplace.list(address(mockNFT), 1, 1 ether);
-        (, , , , uint _price) = marketplace.listings(address(mockNFT), 1);
+        (, , uint _price) = marketplace.listings(address(mockNFT), 1);
         assertEq(_price, 1 ether);
 
         marketplace.cancelList(address(mockNFT), 1);
         vm.stopPrank();
 
-        (, , , , uint __price) = marketplace.listings(address(mockNFT), 1);
+        (, , uint __price) = marketplace.listings(address(mockNFT), 1);
 
         assertEq(__price, 0);
     }
@@ -77,7 +77,7 @@ contract MarketplaceTest is Test {
         mockNFT.setApprovalForAll(address(marketplace), true);
         marketplace.list(address(mockNFT), 1, 1 ether);
         vm.stopPrank();
-        (, , , , uint _price) = marketplace.listings(address(mockNFT), 1);
+        (, , uint _price) = marketplace.listings(address(mockNFT), 1);
 
         assertEq(_price, 1 ether);
 
@@ -90,7 +90,7 @@ contract MarketplaceTest is Test {
         vm.startPrank(user1);
         mockNFT.setApprovalForAll(address(marketplace), true);
         marketplace.list(address(mockNFT), 1, 1 ether);
-        (, , , , uint _price) = marketplace.listings(address(mockNFT), 1);
+        (, , uint _price) = marketplace.listings(address(mockNFT), 1);
         vm.stopPrank();
 
         assertEq(_price, 1 ether);
@@ -99,7 +99,7 @@ contract MarketplaceTest is Test {
         vm.prank(user2);
         vm.deal(user2, 1 ether);
         marketplace.buy{value: 1 ether}(address(mockNFT), 1);
-        (, , , , uint __price) = marketplace.listings(address(mockNFT), 1);
+        (, , uint __price) = marketplace.listings(address(mockNFT), 1);
 
         assertEq(__price, 0);
         assertEq(mockNFT.ownerOf(1), user2);
@@ -116,7 +116,7 @@ contract MarketplaceTest is Test {
         vm.startPrank(user1);
         mockNFT.setApprovalForAll(address(marketplace), true);
         marketplace.list(address(mockNFT), 1, 1 ether);
-        (, , , , uint _price) = marketplace.listings(address(mockNFT), 1);
+        (, , uint _price) = marketplace.listings(address(mockNFT), 1);
         vm.stopPrank();
 
         assertEq(_price, 1 ether);
@@ -134,7 +134,7 @@ contract MarketplaceTest is Test {
         vm.deal(user2, 1 ether);
 
         marketplace.bidCollection{value: bidPrice}(address(mockNFT), bidPrice, 1);
-        (, , , uint price) = marketplace.collectionBids(address(mockNFT), user2);
+        (, , uint price) = marketplace.collectionBids(address(mockNFT), user2);
 
         assertEq(price, bidPrice);
         assertEq(user2.balance, bidPrice);
@@ -185,14 +185,14 @@ contract MarketplaceTest is Test {
         vm.startPrank(user2);
         vm.deal(user2, bidPrice);
         marketplace.bidCollection{value: bidPrice}(address(mockNFT), bidPrice, 1);
-        (, , , uint price) = marketplace.collectionBids(address(mockNFT), user2);
+        (, , uint price) = marketplace.collectionBids(address(mockNFT), user2);
 
         assertEq(price, bidPrice);
         assertEq(user2.balance, 0);
         assertEq(address(marketplace).balance, bidPrice);
 
         marketplace.cancelCollectionBid(address(mockNFT));
-        (, , , uint priceAfter) = marketplace.collectionBids(address(mockNFT), user2);
+        (, , uint priceAfter) = marketplace.collectionBids(address(mockNFT), user2);
         assertEq(priceAfter, 0);
         assertEq(user2.balance, bidPrice);
         assertEq(address(marketplace).balance, 0);
@@ -204,7 +204,7 @@ contract MarketplaceTest is Test {
         vm.startPrank(user2);
         vm.deal(user2, bidPrice);
         marketplace.bidCollection{value: bidPrice}(address(mockNFT), bidPrice, 1);
-        (, , , uint price) = marketplace.collectionBids(address(mockNFT), user2);
+        (, , uint price) = marketplace.collectionBids(address(mockNFT), user2);
         vm.stopPrank();
 
         assertEq(price, bidPrice);
@@ -299,7 +299,7 @@ contract MarketplaceTest is Test {
         vm.deal(user2, bidPrice);
         assertEq(user2.balance, bidPrice);
         marketplace.bidToken{value: bidPrice}(address(mockNFT), 1, bidPrice);
-        (, , , uint price) = marketplace.tokenBids(address(mockNFT), 1, user2);
+        (, , uint price) = marketplace.tokenBids(address(mockNFT), 1, user2);
         assertEq(user2.balance, 0);
         assertEq(price, bidPrice);
         vm.stopPrank();
@@ -394,13 +394,13 @@ contract MarketplaceTest is Test {
         vm.deal(user2, bidPrice);
         assertEq(user2.balance, bidPrice);
         marketplace.bidToken{value: bidPrice}(address(mockNFT), 1, bidPrice);
-        (, , , uint price) = marketplace.tokenBids(address(mockNFT), 1, user2);
+        (, , uint price) = marketplace.tokenBids(address(mockNFT), 1, user2);
         assertEq(user2.balance, 0);
         assertEq(price, bidPrice);
 
         marketplace.cancelTokenBid(address(mockNFT), 1);
 
-        (, , , uint priceAfter) = marketplace.tokenBids(address(mockNFT), 1, user2);
+        (, , uint priceAfter) = marketplace.tokenBids(address(mockNFT), 1, user2);
         assertEq(user2.balance, bidPrice);
         assertEq(priceAfter, 0);
         vm.stopPrank();
@@ -417,14 +417,12 @@ contract MarketplaceTest is Test {
     function testUpdateRoyalties() public {
         vm.startPrank(deployer);
 
-        (uint fee, address owner) = marketplace.royalties(address(mockNFT));
-        assertEq(owner, address(0));
+        (, , uint fee, , , ) = marketplace.collections(address(mockNFT));
         assertEq(fee, 0);
 
-        marketplace.updateRoyalties(address(mockNFT), user1, 500);
-        (uint feeAfter, address ownerAfter) = marketplace.royalties(address(mockNFT));
+        marketplace.updateCollectionRoyalties(address(mockNFT), 500);
+        (, , uint feeAfter, , , ) = marketplace.collections(address(mockNFT));
 
-        assertEq(ownerAfter, user1);
         assertEq(feeAfter, 500);
         vm.stopPrank();
     }
@@ -432,7 +430,7 @@ contract MarketplaceTest is Test {
     function testUpdateRoyaltiesFeeTooHigh() public {
         vm.startPrank(deployer);
         vm.expectRevert("Marketplace: fee too high");
-        marketplace.updateRoyalties(address(mockNFT), user1, 3000);
+        marketplace.updateCollectionRoyalties(address(mockNFT), 3000);
         vm.stopPrank();
     }
 
